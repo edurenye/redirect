@@ -13,7 +13,7 @@
  * @} End of "defgroup redirect_api".
  */
 use Drupal\Component\Utility\UrlHelper;
-use Drupal\Core\Cache\Cache;
+use Drupal\Core\Database\Database;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Field\FieldItemList;
 use Drupal\Core\Form\FormStateInterface;
@@ -399,4 +399,44 @@ function redirect_redirect_operations() {
  */
 function redirect_source_link_get_status_messages(array $form, FormStateInterface $form_state) {
   return $form['redirect_source']['widget'][0]['status_box'];
+}
+
+/**
+ * Implements hook_watchdog.
+ *
+ * Write a redirect_error per 404.
+ */
+function redirect_watchdog(array $log_entry) {
+  if ($log_entry['type'] == 'page not found') {
+    if (!\Drupal::config('redirect_error_log')) {
+      return;
+    }
+    global $user;
+    global $language;
+    $langcode = $language->language;
+    if (Drupal::moduleHandler()->moduleExists('locale')) {
+      require_once DRUPAL_ROOT . '/includes/language.inc';
+      module_load_include('locale.inc', 'locale');
+      // Fetch language from URL.
+      $languages = language_list();
+      // We need a workaround for language negotiation as the language
+      // is already cutoff from $_GET['q'].
+      $saveq = $_GET['q'];
+      $_GET['q'] = request_path();
+      require DRUPAL_ROOT . '/includes/locale.inc';
+      $url_langcode = locale_language_from_url($languages);
+      $langcode = $url_langcode === FALSE ? '' : $url_langcode;
+      $_GET['q'] = $saveq;
+    }
+    // Write record.
+    $record = array(
+      'source' => $log_entry['message'],
+      'uid' => $user->uid,
+      // @todo fix for cases where language prefix is missing.
+      'language' => $langcode,
+      'status_code' => '404',
+      'timestamp' => $log_entry['timestamp'],
+    );
+    Database::getConnection()->insert('redirect_error')->fields($record)->execute();
+  }
 }
